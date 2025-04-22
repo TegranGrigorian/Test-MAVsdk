@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Drone Mission Planner</title>
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #map { 
+            height: 500px;
+            margin-bottom: 20px;
+            border: 1px solid #ccc;
+        }
+        .control-panel {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            cursor: pointer;
+            border-radius: 3px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        #status {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f9f9f9;
+            border-left: 4px solid #2196F3;
+        }
+        #drone-info {
+            margin-top: 20px;
+            background: #f0f0f0;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        .waypoint-list {
+            margin-top: 20px;
+            padding: 0;
+            list-style-type: none;
+        }
+        .waypoint-list li {
+            background: #f9f9f9;
+            padding: 8px;
+            margin-bottom: 5px;
+            border-left: 3px solid #4CAF50;
+        }
+    </style>
+</head>
+<body>
+    <h1>Drone Mission Planner</h1>
+    
+    <div class="control-panel">
+        <p>Click on the map to add waypoints. Current waypoints: <span id="waypoint-counter">0</span></p>
+        <button onclick="sendMission()">Send to Jetson Nano</button>
+        <button onclick="clearWaypoints()">Clear Waypoints</button>
+        <button onclick="getDroneInfo()">Get Drone Info</button>
+    </div>
+    
+    <div id="map"></div>
+    
+    <div id="status">
+        <h3>Mission Status</h3>
+        <p id="status-message">No mission sent yet</p>
+    </div>
+    
+    <div id="drone-info">
+        <h3>Drone Information</h3>
+        <p id="drone-info-content">Click "Get Drone Info" to fetch data</p>
+    </div>
+    
+    <h3>Waypoints</h3>
+    <ul id="waypoint-list" class="waypoint-list"></ul>
+    
+    <script>
+        const map = L.map('map').setView([51.505, -0.09], 13);  // Default coords (London)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        let waypoints = [];
+        let markers = [];
+        
+        map.on('click', (e) => {
+            const marker = L.marker([e.latlng.lat, e.latlng.lng]).addTo(map);
+            markers.push(marker);
+            
+            const waypoint = { 
+                lat: e.latlng.lat, 
+                lng: e.latlng.lng, 
+                alt: 10  // Altitude: 10m
+            };
+            waypoints.push(waypoint);
+            
+            updateWaypointCounter();
+            updateWaypointList();
+        });
+
+        function updateWaypointCounter() {
+            document.getElementById('waypoint-counter').textContent = waypoints.length;
+        }
+        
+        function updateWaypointList() {
+            const list = document.getElementById('waypoint-list');
+            list.innerHTML = '';
+            
+            waypoints.forEach((wp, index) => {
+                const li = document.createElement('li');
+                li.textContent = `#${index + 1}: Lat: ${wp.lat.toFixed(6)}, Lng: ${wp.lng.toFixed(6)}, Alt: ${wp.alt}m`;
+                list.appendChild(li);
+            });
+        }
+        
+        function clearWaypoints() {
+            waypoints = [];
+            markers.forEach(marker => map.removeLayer(marker));
+            markers = [];
+            updateWaypointCounter();
+            updateWaypointList();
+            document.getElementById('status-message').textContent = 'Waypoints cleared';
+        }
+
+        function sendMission() {
+            if (waypoints.length === 0) {
+                document.getElementById('status-message').textContent = 'No waypoints to send!';
+                return;
+            }
+            
+            document.getElementById('status-message').textContent = 'Sending mission...';
+            
+            fetch('/upload_mission', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ waypoints })
+            })
+            .then(res => res.json())
+            .then(data => {
+                console.log(data);
+                document.getElementById('status-message').innerHTML = 
+                    `Mission sent successfully!<br>
+                     Server status: ${data.status}<br>
+                     Jetson response: ${data.jetson_response ? 
+                        JSON.stringify(data.jetson_response) : 'No response from Jetson'}`;
+            })
+            .catch(err => {
+                document.getElementById('status-message').textContent = 
+                    `Error sending mission: ${err.message}`;
+            });
+        }
+        
+        function getDroneInfo() {
+            document.getElementById('drone-info-content').textContent = 'Fetching drone info...';
+            
+            fetch('/jetson_status')
+            .then(res => res.json())
+            .then(data => {
+                console.log(data);
+                if (data.status === 'error') {
+                    document.getElementById('drone-info-content').textContent = 
+                        `Error: ${data.message}`;
+                    return;
+                }
+                
+                let infoHtml = `
+                    <p><strong>Ready to arm:</strong> ${data.is_ready ? 'Yes' : 'No'}</p>
+                    <p><strong>Battery:</strong> ${data.battery.remaining_percent.toFixed(1)}% (${data.battery.voltage_v.toFixed(2)}V)</p>
+                    <p><strong>Position:</strong><br>
+                    Latitude: ${data.gps.latitude_deg.toFixed(6)}<br>
+                    Longitude: ${data.gps.longitude_deg.toFixed(6)}<br>
+                    Altitude: ${data.gps.absolute_altitude_m.toFixed(1)}m (${data.gps.relative_altitude_m.toFixed(1)}m relative)</p>
+                `;
+                document.getElementById('drone-info-content').innerHTML = infoHtml;
+            })
+            .catch(err => {
+                document.getElementById('drone-info-content').textContent = 
+                    `Error fetching drone info: ${err.message}`;
+            });
+        }
+    </script>
+</body>
+</html>
