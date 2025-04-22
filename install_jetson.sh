@@ -18,6 +18,7 @@ sudo apt install python3-venv -y
 
 #setup virtualenv
 virtualenv .venv --python=python3
+sleep 1 #give time for virtualenv to set up??
 source .venv/bin/activate
 
 #install requirements for jetson
@@ -34,3 +35,8 @@ echo "Installation completed."
 #install should be completed no need for hidden.py file
 echo "run jetson.py to start the jetson script"
 echo "You can now run the jetson script using the command 'python jetson.py'"
+
+#bug happens with source .venv/bin/activate
+echo "bug happens with source .venv/bin/activate"
+echo "run 'source .venv/bin/activate' to activate the virtualenv"
+source .venv/bin/activate
